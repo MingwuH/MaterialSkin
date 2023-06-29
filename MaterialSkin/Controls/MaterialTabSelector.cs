@@ -5,8 +5,10 @@
     using System.Collections.Generic;
     using System.ComponentModel;
     using System.Drawing;
+    using System.Drawing.Drawing2D;
     using System.Drawing.Text;
     using System.Globalization;
+    using System.Linq;
     using System.Windows.Forms;
 
     public class MaterialTabSelector : Control, IMaterialControl
@@ -76,6 +78,79 @@
         private readonly AnimationManager _animationManager;
 
         private List<Rectangle> _tabRects;
+        public int? _tabRoundedCornerRadius;
+        private Color? _primaryColor;
+        private Brush _tabBackBrush;
+        private Brush _tabHoverBrush;
+
+        public Color PrimaryColor
+        {
+            get
+            {
+                return _primaryColor.GetValueOrDefault(this.SkinManager.ColorScheme.PrimaryColor);
+            }
+            set
+            {
+                this._primaryColor = value;
+            }
+        }
+        public Brush TabBackBrush
+        {
+            get
+            {
+                return this._tabBackBrush == null ?
+                    new SolidBrush(this.PrimaryColor) :
+                    this._tabBackBrush;
+            }
+            set
+            {
+                this._tabBackBrush = value;
+            }
+        }
+        public Brush TabSelectedBrush
+        {
+            get;
+            set;
+        }
+        public Brush TabHoverBrush
+        {
+            get
+            {
+                return this._tabHoverBrush == null ?
+                    this.SkinManager.BackgroundHoverBrush :
+                    this._tabHoverBrush;
+            }
+            set
+            {
+                this._tabHoverBrush = value;
+            }
+        }
+        public int? RemoveButtonImageIndex
+        {
+            get;
+            set;
+        }
+        public Rectangle _removeRect;
+        public IReadOnlyCollection<Rectangle> TabBounds
+        {
+            get { return this._tabRects; }
+        }
+
+        public int? TabRoundedCornerRadius
+        {
+            get
+            {
+                return this._tabRoundedCornerRadius;
+            }
+            set
+            {
+                if (value.HasValue &&
+                    value * 2 > this.Height)
+                    this._tabRoundedCornerRadius = this.Height / 2;
+                else
+                    this._tabRoundedCornerRadius = value;
+            }
+        }
 
         private const int ICON_SIZE = 24;
         private const int FIRST_TAB_PADDING = 50;
@@ -168,7 +243,7 @@
             var g = e.Graphics;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
-            g.Clear(SkinManager.ColorScheme.PrimaryColor);
+            g.Clear(this.PrimaryColor);
 
             if (_baseTabControl == null) return;
 
@@ -189,11 +264,79 @@
                 rippleBrush.Dispose();
             }
 
+            // Draw tab with rounded corner
+            if (this.TabRoundedCornerRadius.GetValueOrDefault(0) > 0)
+            {
+                foreach (var rect in this._tabRects)
+                {
+                    var gp = this.GetTabRoundCornerRegion(rect, this.TabRoundedCornerRadius.Value);
+
+                    var index = this._tabRects.IndexOf(rect);
+
+                    if (this.TabBackBrush != null)
+                    {
+                        var brush = this._tabRects[this._baseTabControl.SelectedIndex] == rect ?
+                            this.TabSelectedBrush :
+                            this.TabBackBrush;
+                        g.FillPath(brush, gp);
+                    }
+                    else
+                    {
+                        g.DrawPath(new Pen(Color.Black), gp);
+                    }
+                }
+            }
+
             //Draw tab headers
             if (_tab_over_index >= 0)
-            { 
-                //Change mouse over tab background color
-                g.FillRectangle(SkinManager.BackgroundHoverBrush , _tabRects[_tab_over_index].X, _tabRects[_tab_over_index].Y , _tabRects[_tab_over_index].Width, _tabRects[_tab_over_index].Height - _tab_indicator_height);
+            {
+                var hoveredTabRect = this._tabRects[_tab_over_index];
+
+                //Change mouse over tab color
+                if (this.TabRoundedCornerRadius.GetValueOrDefault(0) > 0)
+                {
+                    var gp = this.GetTabRoundCornerRegion(hoveredTabRect, this.TabRoundedCornerRadius.Value);
+
+                    if (this.TabHoverBrush != null)
+                        g.FillPath(this.TabHoverBrush, gp);
+                }
+                else
+                {
+                    g.FillRectangle(
+                        this.TabHoverBrush,
+                        hoveredTabRect.X,
+                        hoveredTabRect.Y,
+                        hoveredTabRect.Width,
+                        hoveredTabRect.Height - _tab_indicator_height
+                        );
+                }
+
+                // Draw remove button
+                if (this.RemoveButtonImageIndex.GetValueOrDefault(-1) >= 0 &&
+                    this.RemoveButtonImageIndex.Value < this._baseTabControl.ImageList.Images.Count)
+                {
+                    var image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
+                    var widthUnit = image.Width / 2;
+                    var heightUnit = image.Height / 2;
+                    var capFromTabRight = 10 + this.TabRoundedCornerRadius.GetValueOrDefault(0);
+
+                    this.UpdateRmoveButtonRect();
+
+                    if (this._tab_over_index < this._tabRects.Count - 1)
+                    {
+                        g.FillEllipse(
+                            Brushes.LightGray,
+                            this._removeRect
+                            );
+                        g.DrawImage(
+                            image,
+                            _tabRects[_tab_over_index].Right - widthUnit - capFromTabRight,
+                            (_tabRects[_tab_over_index].Bottom - heightUnit) / 2,
+                            widthUnit,
+                            heightUnit
+                            );
+                    }
+                }
             }
 
             foreach (TabPage tabPage in _baseTabControl.TabPages)
@@ -262,18 +405,22 @@
                         g.DrawImage(!String.IsNullOrEmpty(tabPage.ImageKey) ? _baseTabControl.ImageList.Images[tabPage.ImageKey]: _baseTabControl.ImageList.Images[tabPage.ImageIndex], iconRect);
                     }
                 }
-           }
+            }
 
             //Animate tab indicator
             var previousSelectedTabIndexIfHasOne = _previousSelectedTabIndex == -1 ? _baseTabControl.SelectedIndex : _previousSelectedTabIndex;
-            var previousActiveTabRect = _tabRects[previousSelectedTabIndexIfHasOne];
-            var activeTabPageRect = _tabRects[_baseTabControl.SelectedIndex];
 
-            var y = activeTabPageRect.Bottom - _tab_indicator_height;
-            var x = previousActiveTabRect.X + (int)((activeTabPageRect.X - previousActiveTabRect.X) * animationProgress);
-            var width = previousActiveTabRect.Width + (int)((activeTabPageRect.Width - previousActiveTabRect.Width) * animationProgress);
+            if (previousSelectedTabIndexIfHasOne < _tabRects.Count)
+            {
+                var previousActiveTabRect = _tabRects[previousSelectedTabIndexIfHasOne];
+                var activeTabPageRect = _tabRects[_baseTabControl.SelectedIndex];
 
-            g.FillRectangle(SkinManager.ColorScheme.AccentBrush, x, y, width, _tab_indicator_height);
+                var y = activeTabPageRect.Bottom - _tab_indicator_height;
+                var x = previousActiveTabRect.X + (int)((activeTabPageRect.X - previousActiveTabRect.X) * animationProgress);
+                var width = previousActiveTabRect.Width + (int)((activeTabPageRect.Width - previousActiveTabRect.Width) * animationProgress);
+
+                g.FillRectangle(SkinManager.ColorScheme.AccentBrush, x, y, width, _tab_indicator_height);
+            }
         }
 
         private int CalculateTextAlpha(int tabIndex, double animationProgress)
@@ -300,7 +447,23 @@
         {
             base.OnMouseUp(e);
 
-            if (_tabRects == null) UpdateTabRects();
+            if (_tabRects == null)
+                UpdateTabRects();
+
+            this.UpdateRmoveButtonRect();
+
+            for (var i = 0; i < _tabRects.Count; i++)
+            {
+                if (this._tabRects[i].Contains(e.Location) &&
+                    this._removeRect.Contains(e.Location) &&
+                    i < this._tabRects.Count - 1)
+                {
+                    var tabPage = this._baseTabControl.TabPages[i];
+                    this._baseTabControl.TabPages.Remove(tabPage);
+                    return;
+                }
+            }
+
             for (var i = 0; i < _tabRects.Count; i++)
             {
                 if (_tabRects[i].Contains(e.Location))
@@ -320,7 +483,10 @@
                 return;
 
             if (_tabRects == null)
+            {
                 UpdateTabRects();
+                UpdateRmoveButtonRect();
+            }
 
             int old_tab_over_index = _tab_over_index;
             _tab_over_index = -1;
@@ -383,10 +549,52 @@
                                 _tabRects.Add(new Rectangle(FIRST_TAB_PADDING - (TAB_HEADER_PADDING), 0, TabWidth, Height));
                             else
                                 _tabRects.Add(new Rectangle(_tabRects[i - 1].Right, 0, TabWidth, Height));
+
+                            var max = _tabRects.Max(r => r.Right);
+                            if (max > this.Width)
+                                this.Width = max;
                         }
                     }
                 }
             }
+        }
+
+        private void UpdateRmoveButtonRect()
+        {
+            if (_tab_over_index >= 0)
+            {
+                if (this.RemoveButtonImageIndex.GetValueOrDefault(-1) >= 0 &&
+                    this.RemoveButtonImageIndex.Value < this._baseTabControl.ImageList.Images.Count)
+                {
+                    var image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
+                    var widthUnit = image.Width / 2;
+                    var heightUnit = image.Height / 2;
+                    var shift = 10 + this.TabRoundedCornerRadius.GetValueOrDefault(0);
+
+                    this._removeRect = new Rectangle(
+                        _tabRects[_tab_over_index].Right - (int)Math.Round(widthUnit * 1.5) - shift,
+                        (_tabRects[_tab_over_index].Bottom - heightUnit * 2) / 2,
+                        widthUnit * 2,
+                        heightUnit * 2
+                        );
+                }
+            }
+        }
+
+        private GraphicsPath GetTabRoundCornerRegion(Rectangle rect, int radius)
+        {
+            var diameter = radius * 2;
+            var gp = new GraphicsPath();
+            gp.AddLine(rect.Left + radius, rect.Bottom, rect.Left, rect.Bottom);
+            gp.AddArc(new Rectangle(rect.Left - radius, rect.Bottom - diameter, diameter, diameter), -270, -90);
+            gp.AddLine(rect.Left + radius, rect.Bottom - radius, rect.Left + radius, rect.Top + radius);
+            gp.AddArc(new Rectangle(rect.Left + radius, rect.Top, diameter, diameter), 180, 90);
+            gp.AddLine(rect.Left + radius, rect.Top, rect.Right - diameter, rect.Top);
+            gp.AddArc(new Rectangle(rect.Right - diameter * 3 / 2, rect.Top, diameter, diameter), -90, 90);
+            gp.AddLine(rect.Right - radius, rect.Top + radius, rect.Right - radius, rect.Bottom - radius);
+            gp.AddArc(new Rectangle(rect.Right - radius, rect.Bottom - diameter, diameter, diameter), 180, -90);
+
+            return gp;
         }
     }
 }
