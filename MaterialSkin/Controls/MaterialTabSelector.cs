@@ -78,11 +78,18 @@
         private readonly AnimationManager _animationManager;
 
         private List<Rectangle> _tabRects;
-        public int? _tabRoundedCornerRadius;
+        private Rectangle _removeRect;
+        private int? _tabRoundedCornerRadius;
+        private bool? _drawTabIndicator;
+        private bool? _lastTabUnremovable;
         private Color? _primaryColor;
+        private Color? _textColor;
         private Brush _tabBackBrush;
         private Brush _tabHoverBrush;
 
+        /// <summary>
+        /// Indicate primary color.
+        /// </summary>
         public Color PrimaryColor
         {
             get
@@ -94,6 +101,23 @@
                 this._primaryColor = value;
             }
         }
+        /// <summary>
+        /// Indicate tab text color.
+        /// </summary>
+        public Color TextColor
+        {
+            get
+            {
+                return _textColor.GetValueOrDefault(this.SkinManager.ColorScheme.TextColor);
+            }
+            set
+            {
+                this._textColor = value;
+            }
+        }
+        /// <summary>
+        /// Indicate tab background brush.
+        /// </summary>
         public Brush TabBackBrush
         {
             get
@@ -107,11 +131,17 @@
                 this._tabBackBrush = value;
             }
         }
+        /// <summary>
+        /// Indicate selected tab brush.
+        /// </summary>
         public Brush TabSelectedBrush
         {
             get;
             set;
         }
+        /// <summary>
+        /// Indicate hovered tab brush.
+        /// </summary>
         public Brush TabHoverBrush
         {
             get
@@ -125,17 +155,52 @@
                 this._tabHoverBrush = value;
             }
         }
+        /// <summary>
+        /// If set, a remove tab button which user specified will draw on tab.
+        /// </summary>
         public int? RemoveButtonImageIndex
         {
             get;
             set;
         }
-        public Rectangle _removeRect;
+        /// <summary>
+        /// If set, a tab indicator will be drawn.
+        /// </summary>
+        public bool DrawTabIndicator
+        {
+            get
+            {
+                return this._drawTabIndicator.GetValueOrDefault(true);
+            }
+            set
+            {
+                this._drawTabIndicator = value;
+            }
+        }
+        /// <summary>
+        /// Indicate the last tab allow to be removed.
+        /// </summary>
+        public bool IsLastTabUnremovable
+        {
+            get
+            {
+                return this._lastTabUnremovable.GetValueOrDefault(false);
+            }
+            set
+            {
+                this._lastTabUnremovable = value;
+            }
+        }
+        /// <summary>
+        /// Indicate each tab's boundary.
+        /// </summary>
         public IReadOnlyCollection<Rectangle> TabBounds
         {
             get { return this._tabRects; }
         }
-
+        /// <summary>
+        /// Indicate the tab rectangle with round corner by the spcified radius.
+        /// </summary>
         public int? TabRoundedCornerRadius
         {
             get
@@ -159,6 +224,7 @@
         private const int TAB_WIDTH_MAX = 264;
 
         private int _tab_over_index = -1;
+        private bool _is_in_tab_remove_rect = false;
 
         private CustomCharacterCasing _characterCasing;
 
@@ -250,6 +316,9 @@
             if (!_animationManager.IsAnimating() || _tabRects == null || _tabRects.Count != _baseTabControl.TabCount)
                 UpdateTabRects();
 
+            if (this._tabRects.Count == 0)
+                return;
+
             var animationProgress = _animationManager.GetProgress();
 
             //Click feedback
@@ -271,24 +340,32 @@
                 {
                     var gp = this.GetTabRoundCornerRegion(rect, this.TabRoundedCornerRadius.Value);
 
-                    var index = this._tabRects.IndexOf(rect);
-
                     if (this.TabBackBrush != null)
                     {
-                        var brush = this._tabRects[this._baseTabControl.SelectedIndex] == rect ?
-                            this.TabSelectedBrush :
-                            this.TabBackBrush;
+                        var selectedRect = this._tabRects[this._baseTabControl.SelectedIndex];
+                        var brush = this.TabBackBrush;
+
+                        if (selectedRect == rect)
+                            brush = this.TabSelectedBrush;
+
                         g.FillPath(brush, gp);
+
+                        if (selectedRect == rect)
+                            g.DrawPath(new Pen(Color.Black), gp);
                     }
                     else
                     {
                         g.DrawPath(new Pen(Color.Black), gp);
                     }
+
+                    // Draw remove buttons
+                    this.DrawRemoveButtonImage(g, rect);
                 }
             }
 
             //Draw tab headers
-            if (_tab_over_index >= 0)
+            if (this._tab_over_index >= 0 &&
+                this._tab_over_index < this._tabRects.Count)
             {
                 var hoveredTabRect = this._tabRects[_tab_over_index];
 
@@ -299,6 +376,8 @@
 
                     if (this.TabHoverBrush != null)
                         g.FillPath(this.TabHoverBrush, gp);
+                    if (this._baseTabControl.SelectedIndex == this._tab_over_index)
+                        g.DrawPath(new Pen(Color.Black), gp);
                 }
                 else
                 {
@@ -315,26 +394,19 @@
                 if (this.RemoveButtonImageIndex.GetValueOrDefault(-1) >= 0 &&
                     this.RemoveButtonImageIndex.Value < this._baseTabControl.ImageList.Images.Count)
                 {
-                    var image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
-                    var widthUnit = image.Width / 2;
-                    var heightUnit = image.Height / 2;
-                    var capFromTabRight = 10 + this.TabRoundedCornerRadius.GetValueOrDefault(0);
-
                     this.UpdateRmoveButtonRect();
 
-                    if (this._tab_over_index < this._tabRects.Count - 1)
+                    if (!this.IsLastTabUnremovable ||
+                        this._tab_over_index < this._tabRects.Count - 1)
                     {
-                        g.FillEllipse(
-                            Brushes.LightGray,
-                            this._removeRect
-                            );
-                        g.DrawImage(
-                            image,
-                            _tabRects[_tab_over_index].Right - widthUnit - capFromTabRight,
-                            (_tabRects[_tab_over_index].Bottom - heightUnit) / 2,
-                            widthUnit,
-                            heightUnit
-                            );
+                        if (this._is_in_tab_remove_rect)
+                        {
+                            g.FillEllipse(
+                                Brushes.Red,
+                                this._removeRect
+                                );
+                        }
+                        this.DrawRemoveButtonImage(g, this._tabRects[_tab_over_index]);
                     }
                 }
             }
@@ -364,7 +436,7 @@
                             CharacterCasing == CustomCharacterCasing.Lower ? tabPage.Text.ToLower() :
                             CharacterCasing == CustomCharacterCasing.Proper ? textInfo.ToTitleCase(tabPage.Text.ToLower()) : tabPage.Text,
                             Font,
-                            Color.FromArgb(CalculateTextAlpha(currentTabIndex, animationProgress), SkinManager.ColorScheme.TextColor),
+                            Color.FromArgb(CalculateTextAlpha(currentTabIndex, animationProgress), this.TextColor),
                             textLocation.Location,
                             textLocation.Size,
                             NativeTextRenderer.TextAlignFlags.Center | NativeTextRenderer.TextAlignFlags.Middle);
@@ -381,7 +453,7 @@
                             CharacterCasing == CustomCharacterCasing.Lower ? tabPage.Text.ToLower() :
                             CharacterCasing == CustomCharacterCasing.Proper ? textInfo.ToTitleCase(tabPage.Text.ToLower()) : tabPage.Text,
                             SkinManager.getFontByType(MaterialSkinManager.fontType.Body2),
-                            Color.FromArgb(CalculateTextAlpha(currentTabIndex, animationProgress), SkinManager.ColorScheme.TextColor),
+                            Color.FromArgb(CalculateTextAlpha(currentTabIndex, animationProgress), this.TextColor),
                             textLocation.Location,
                             textLocation.Size,
                             NativeTextRenderer.TextAlignFlags.Center | NativeTextRenderer.TextAlignFlags.Middle);
@@ -408,18 +480,29 @@
             }
 
             //Animate tab indicator
-            var previousSelectedTabIndexIfHasOne = _previousSelectedTabIndex == -1 ? _baseTabControl.SelectedIndex : _previousSelectedTabIndex;
-
-            if (previousSelectedTabIndexIfHasOne < _tabRects.Count)
+            if (this.DrawTabIndicator)
             {
-                var previousActiveTabRect = _tabRects[previousSelectedTabIndexIfHasOne];
-                var activeTabPageRect = _tabRects[_baseTabControl.SelectedIndex];
+                var previousSelectedTabIndexIfHasOne = _previousSelectedTabIndex == -1 ? _baseTabControl.SelectedIndex : _previousSelectedTabIndex;
 
-                var y = activeTabPageRect.Bottom - _tab_indicator_height;
-                var x = previousActiveTabRect.X + (int)((activeTabPageRect.X - previousActiveTabRect.X) * animationProgress);
-                var width = previousActiveTabRect.Width + (int)((activeTabPageRect.Width - previousActiveTabRect.Width) * animationProgress);
+                if (previousSelectedTabIndexIfHasOne < _tabRects.Count)
+                {
+                    var previousActiveTabRect = _tabRects[previousSelectedTabIndexIfHasOne];
+                    var activeTabPageRect = _tabRects[_baseTabControl.SelectedIndex];
 
-                g.FillRectangle(SkinManager.ColorScheme.AccentBrush, x, y, width, _tab_indicator_height);
+                    var y = activeTabPageRect.Bottom - _tab_indicator_height;
+                    var x = previousActiveTabRect.X + (int)((activeTabPageRect.X - previousActiveTabRect.X) * animationProgress);
+                    var width = previousActiveTabRect.Width + (int)((activeTabPageRect.Width - previousActiveTabRect.Width) * animationProgress);
+
+                    g.FillRectangle(SkinManager.ColorScheme.AccentBrush, x, y, width, _tab_indicator_height);
+                }
+            }
+            else if (this._tabRects.Count > 0)
+            {
+                var selectedTab = this._tabRects[_baseTabControl.SelectedIndex];
+                var y = selectedTab.Bottom - 1;
+
+                g.DrawLine(new Pen(Color.Black), 0, y, selectedTab.Left + 3, y);
+                g.DrawLine(new Pen(Color.Black), selectedTab.Right - 3, y, this.Right, y);
             }
         }
 
@@ -452,18 +535,28 @@
 
             this.UpdateRmoveButtonRect();
 
+            // Remove tab.
             for (var i = 0; i < _tabRects.Count; i++)
             {
+                // Remove tab
                 if (this._tabRects[i].Contains(e.Location) &&
-                    this._removeRect.Contains(e.Location) &&
-                    i < this._tabRects.Count - 1)
+                    this._removeRect.Contains(e.Location))
                 {
-                    var tabPage = this._baseTabControl.TabPages[i];
-                    this._baseTabControl.TabPages.Remove(tabPage);
-                    return;
+                    if (!this._lastTabUnremovable.GetValueOrDefault(false) ||
+                        i < this._tabRects.Count -1)
+                    {
+                        if (i == this._tabRects.Count - 1 &&
+                            i == this._baseTabControl.SelectedIndex)
+                            this._baseTabControl.SelectedIndex = i - 1;
+
+                        var tabPage = this._baseTabControl.TabPages[i];
+                        this._baseTabControl.TabPages.Remove(tabPage);
+                        return;
+                    }
                 }
             }
 
+            // Select tab changed.
             for (var i = 0; i < _tabRects.Count; i++)
             {
                 if (_tabRects[i].Contains(e.Location))
@@ -501,8 +594,12 @@
             }
             if (_tab_over_index == -1)
                 Cursor = Cursors.Arrow;
-            if (old_tab_over_index != _tab_over_index)
+
+            if (old_tab_over_index != _tab_over_index ||
+                this._is_in_tab_remove_rect != this._removeRect.Contains(e.Location))
                 Invalidate();
+
+            this._is_in_tab_remove_rect = this._removeRect.Contains(e.Location);
         }
 
         protected override void OnMouseLeave(EventArgs e)
@@ -515,7 +612,8 @@
                 UpdateTabRects();
 
             Cursor = Cursors.Arrow;
-            _tab_over_index = -1;
+            this._tab_over_index = -1;
+            this._is_in_tab_remove_rect = false;
             Invalidate();
         }
 
@@ -589,12 +687,32 @@
             gp.AddArc(new Rectangle(rect.Left - radius, rect.Bottom - diameter, diameter, diameter), -270, -90);
             gp.AddLine(rect.Left + radius, rect.Bottom - radius, rect.Left + radius, rect.Top + radius);
             gp.AddArc(new Rectangle(rect.Left + radius, rect.Top, diameter, diameter), 180, 90);
-            gp.AddLine(rect.Left + radius, rect.Top, rect.Right - diameter, rect.Top);
+            gp.AddLine(rect.Left + diameter, rect.Top, rect.Right - diameter, rect.Top);
             gp.AddArc(new Rectangle(rect.Right - diameter * 3 / 2, rect.Top, diameter, diameter), -90, 90);
             gp.AddLine(rect.Right - radius, rect.Top + radius, rect.Right - radius, rect.Bottom - radius);
             gp.AddArc(new Rectangle(rect.Right - radius, rect.Bottom - diameter, diameter, diameter), 180, -90);
 
             return gp;
+        }
+
+        private void DrawRemoveButtonImage(Graphics g, Rectangle rect)
+        {
+            if (this.RemoveButtonImageIndex.GetValueOrDefault(-1) < 0 ||
+                this._baseTabControl.ImageList.Images.Count <= this.RemoveButtonImageIndex.GetValueOrDefault(-1))
+                return;
+
+            var image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
+            var widthUnit = image.Width / 2;
+            var heightUnit = image.Height / 2;
+            var capFromTabRight = 10 + this.TabRoundedCornerRadius.GetValueOrDefault(0);
+
+            g.DrawImage(
+                image,
+                rect.Right - widthUnit - capFromTabRight,
+                (rect.Bottom - heightUnit) / 2,
+                widthUnit,
+                heightUnit
+                );
         }
     }
 }
