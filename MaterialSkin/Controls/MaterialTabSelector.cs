@@ -78,10 +78,11 @@
         private readonly AnimationManager _animationManager;
 
         private List<Rectangle> _tabRects;
+        private List<string> _lockedTabNames;
         private Rectangle _removeRect;
-        private int? _tabRoundedCornerRadius;
+        private int? _tabUpperRoundedCornerRadius;
+        private int? _tabBottomRoundedCornerRadius;
         private bool? _drawTabIndicator;
-        private bool? _lastTabUnremovable;
         private Color? _primaryColor;
         private Color? _textColor;
         private Brush _tabBackBrush;
@@ -178,17 +179,14 @@
             }
         }
         /// <summary>
-        /// Indicate the last tab allow to be removed.
+        /// Indicate the specified tab does not allow to be removed.
         /// </summary>
-        public bool IsLastTabUnremovable
+        public List<string> LockedTabNames
         {
             get
             {
-                return this._lastTabUnremovable.GetValueOrDefault(false);
-            }
-            set
-            {
-                this._lastTabUnremovable = value;
+                return this._lockedTabNames = this._lockedTabNames ??
+                    new List<string>();
             }
         }
         /// <summary>
@@ -199,22 +197,48 @@
             get { return this._tabRects; }
         }
         /// <summary>
-        /// Indicate the tab rectangle with round corner by the spcified radius.
+        /// Indicate the tab rectangle with upper round corner by the spcified radius.
         /// </summary>
-        public int? TabRoundedCornerRadius
+        public int? TabUpperRoundedCornerRadius
         {
             get
             {
-                return this._tabRoundedCornerRadius;
+                return this._tabUpperRoundedCornerRadius;
             }
             set
             {
                 if (value.HasValue &&
                     value * 2 > this.Height)
-                    this._tabRoundedCornerRadius = this.Height / 2;
+                    this._tabUpperRoundedCornerRadius = this.Height / 2;
                 else
-                    this._tabRoundedCornerRadius = value;
+                    this._tabUpperRoundedCornerRadius = value;
             }
+        }
+        /// <summary>
+        /// Indicate the tab rectangle with bottom round corner by the spcified radius.
+        /// </summary>
+        public int? TabBottomRoundedCornerRadius
+        {
+            get
+            {
+                return this._tabBottomRoundedCornerRadius;
+            }
+            set
+            {
+                if (value.HasValue &&
+                    value * 2 > this.Height)
+                    this._tabBottomRoundedCornerRadius = this.Height / 2;
+                else
+                    this._tabBottomRoundedCornerRadius = value;
+            }
+        }
+        /// <summary>
+        /// Indicate the locked tab width.
+        /// </summary>
+        public int? LockedTabWidth
+        {
+            get;
+            set;
         }
 
         private const int ICON_SIZE = 24;
@@ -334,18 +358,24 @@
             }
 
             // Draw tab with rounded corner
-            if (this.TabRoundedCornerRadius.GetValueOrDefault(0) > 0)
+            if (this.TabUpperRoundedCornerRadius.GetValueOrDefault(0) > 0 &&
+                this.TabBottomRoundedCornerRadius.GetValueOrDefault(0) > 0)
             {
                 foreach (var rect in this._tabRects)
                 {
-                    var gp = this.GetTabRoundCornerRegion(rect, this.TabRoundedCornerRadius.Value);
+                    var gp = this.GetTabRoundCornerRegion(
+                        rect,
+                        this.TabUpperRoundedCornerRadius.Value,
+                        this.TabBottomRoundedCornerRadius.Value
+                        );
 
                     if (this.TabBackBrush != null)
                     {
                         var selectedRect = this._tabRects[this._baseTabControl.SelectedIndex];
                         var brush = this.TabBackBrush;
 
-                        if (selectedRect == rect)
+                        if (selectedRect == rect &&
+                            this.TabSelectedBrush != null)
                             brush = this.TabSelectedBrush;
 
                         g.FillPath(brush, gp);
@@ -358,8 +388,11 @@
                         g.DrawPath(new Pen(Color.Black), gp);
                     }
 
-                    // Draw remove buttons
-                    this.DrawRemoveButtonImage(g, rect);
+                    if (!this.IsLockedTabIndex(this._tabRects.IndexOf(rect)))
+                    {
+                        // Draw remove buttons
+                        this.DrawRemoveButtonImage(g, rect);
+                    }
                 }
             }
 
@@ -370,9 +403,14 @@
                 var hoveredTabRect = this._tabRects[_tab_over_index];
 
                 //Change mouse over tab color
-                if (this.TabRoundedCornerRadius.GetValueOrDefault(0) > 0)
+                if (this.TabUpperRoundedCornerRadius.GetValueOrDefault(0) > 0 &&
+                    this.TabBottomRoundedCornerRadius.GetValueOrDefault(0) > 0)
                 {
-                    var gp = this.GetTabRoundCornerRegion(hoveredTabRect, this.TabRoundedCornerRadius.Value);
+                    var gp = this.GetTabRoundCornerRegion(
+                        hoveredTabRect,
+                        this.TabUpperRoundedCornerRadius.Value,
+                        this.TabBottomRoundedCornerRadius.Value
+                        );
 
                     if (this.TabHoverBrush != null)
                         g.FillPath(this.TabHoverBrush, gp);
@@ -386,7 +424,7 @@
                         hoveredTabRect.X,
                         hoveredTabRect.Y,
                         hoveredTabRect.Width,
-                        hoveredTabRect.Height - _tab_indicator_height
+                        hoveredTabRect.Height - this.GetTabIndicatorHeight()
                         );
                 }
 
@@ -396,7 +434,7 @@
                 {
                     this.UpdateRmoveButtonRect();
 
-                    if (!this.IsLastTabUnremovable ||
+                    if (!this.IsLockedTabIndex(this._tab_over_index) ||
                         this._tab_over_index < this._tabRects.Count - 1)
                     {
                         if (this._is_in_tab_remove_rect)
@@ -489,11 +527,11 @@
                     var previousActiveTabRect = _tabRects[previousSelectedTabIndexIfHasOne];
                     var activeTabPageRect = _tabRects[_baseTabControl.SelectedIndex];
 
-                    var y = activeTabPageRect.Bottom - _tab_indicator_height;
+                    var y = activeTabPageRect.Bottom - this.GetTabIndicatorHeight();
                     var x = previousActiveTabRect.X + (int)((activeTabPageRect.X - previousActiveTabRect.X) * animationProgress);
                     var width = previousActiveTabRect.Width + (int)((activeTabPageRect.Width - previousActiveTabRect.Width) * animationProgress);
 
-                    g.FillRectangle(SkinManager.ColorScheme.AccentBrush, x, y, width, _tab_indicator_height);
+                    g.FillRectangle(SkinManager.ColorScheme.AccentBrush, x, y, width, this._tab_indicator_height);
                 }
             }
             else if (this._tabRects.Count > 0)
@@ -538,23 +576,30 @@
             // Remove tab.
             for (var i = 0; i < _tabRects.Count; i++)
             {
+                if (!this._tabRects[i].Contains(e.Location))
+                    continue;
+
+                // Skip locked tab.
+                if (this.IsLockedTabIndex(i))
+                    continue;
+
                 // Remove tab
-                if (this._tabRects[i].Contains(e.Location) &&
+                if (e.Button == MouseButtons.Middle ||
                     this._removeRect.Contains(e.Location))
                 {
-                    if (!this._lastTabUnremovable.GetValueOrDefault(false) ||
-                        i < this._tabRects.Count -1)
-                    {
-                        if (i == this._tabRects.Count - 1 &&
-                            i == this._baseTabControl.SelectedIndex)
-                            this._baseTabControl.SelectedIndex = i - 1;
+                    if (i == this._tabRects.Count - 1 &&
+                        i == this._baseTabControl.SelectedIndex)
+                        this._baseTabControl.SelectedIndex = i - 1;
 
-                        var tabPage = this._baseTabControl.TabPages[i];
-                        this._baseTabControl.TabPages.Remove(tabPage);
-                        return;
-                    }
+                    var tabPage = this._baseTabControl.TabPages[i];
+                    this._baseTabControl.TabPages.Remove(tabPage);
+                    return;
                 }
             }
+
+            // Click mouse middle button should not change the selected tab.
+            if (e.Button == MouseButtons.Middle)
+                return;
 
             // Select tab changed.
             for (var i = 0; i < _tabRects.Count; i++)
@@ -643,6 +688,11 @@
                             else if (TabWidth < TAB_WIDTH_MIN)
                                 TabWidth = TAB_WIDTH_MIN;
 
+                            // change locked tab width
+                            if (this.IsLockedTabIndex(i) &&
+                                this.LockedTabWidth.HasValue)
+                                TabWidth = this.LockedTabWidth.Value;
+
                             if (i==0)
                                 _tabRects.Add(new Rectangle(FIRST_TAB_PADDING - (TAB_HEADER_PADDING), 0, TabWidth, Height));
                             else
@@ -667,7 +717,7 @@
                     var image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
                     var widthUnit = image.Width / 2;
                     var heightUnit = image.Height / 2;
-                    var shift = 10 + this.TabRoundedCornerRadius.GetValueOrDefault(0);
+                    var shift = 10 + this.TabBottomRoundedCornerRadius.GetValueOrDefault(0);
 
                     this._removeRect = new Rectangle(
                         _tabRects[_tab_over_index].Right - (int)Math.Round(widthUnit * 1.5) - shift,
@@ -679,20 +729,33 @@
             }
         }
 
-        private GraphicsPath GetTabRoundCornerRegion(Rectangle rect, int radius)
+        private GraphicsPath GetTabRoundCornerRegion(Rectangle rect, int upperCornerRadius, int bottomCornerRadius)
         {
-            var diameter = radius * 2;
+            var uDiameter = upperCornerRadius * 2;
+            var bDiameter = bottomCornerRadius * 2;
             var gp = new GraphicsPath();
-            gp.AddLine(rect.Left + radius, rect.Bottom, rect.Left, rect.Bottom);
-            gp.AddArc(new Rectangle(rect.Left - radius, rect.Bottom - diameter, diameter, diameter), -270, -90);
-            gp.AddLine(rect.Left + radius, rect.Bottom - radius, rect.Left + radius, rect.Top + radius);
-            gp.AddArc(new Rectangle(rect.Left + radius, rect.Top, diameter, diameter), 180, 90);
-            gp.AddLine(rect.Left + diameter, rect.Top, rect.Right - diameter, rect.Top);
-            gp.AddArc(new Rectangle(rect.Right - diameter * 3 / 2, rect.Top, diameter, diameter), -90, 90);
-            gp.AddLine(rect.Right - radius, rect.Top + radius, rect.Right - radius, rect.Bottom - radius);
-            gp.AddArc(new Rectangle(rect.Right - radius, rect.Bottom - diameter, diameter, diameter), 180, -90);
+
+            var drawBoundLeft = rect.Left + bottomCornerRadius;
+            var drawBoundRight = rect.Right - bottomCornerRadius;
+
+            //gp.AddLine(rect.Left + bottomCornerRadius, rect.Bottom, rect.Left, rect.Bottom);
+            // Draw left-down corner.
+            gp.AddArc(new Rectangle(rect.Left - bottomCornerRadius, rect.Bottom - bDiameter, bDiameter, bDiameter), -270, -90);
+            gp.AddLine(drawBoundLeft, rect.Bottom - bottomCornerRadius, drawBoundLeft, rect.Top + upperCornerRadius);
+            // Draw left-top corner.
+            gp.AddArc(new Rectangle(drawBoundLeft, rect.Top, uDiameter, uDiameter), 180, 90);
+            gp.AddLine(drawBoundLeft + upperCornerRadius, rect.Top, drawBoundRight - upperCornerRadius, rect.Top);
+            // Draw right-top corner
+            gp.AddArc(new Rectangle(drawBoundRight - uDiameter, rect.Top, uDiameter, uDiameter), -90, 90);
+            gp.AddLine(drawBoundRight, rect.Top + upperCornerRadius, drawBoundRight, rect.Bottom - bottomCornerRadius);
+            // Draw right-bottom corner
+            gp.AddArc(new Rectangle(drawBoundRight, rect.Bottom - bDiameter, bDiameter, bDiameter), 180, -90);
 
             return gp;
+        }
+        private GraphicsPath GetTabRoundCornerRegion(Rectangle rect, int radius)
+        {
+            return this.GetTabRoundCornerRegion(rect, radius, radius);
         }
 
         private void DrawRemoveButtonImage(Graphics g, Rectangle rect)
@@ -704,7 +767,7 @@
             var image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
             var widthUnit = image.Width / 2;
             var heightUnit = image.Height / 2;
-            var capFromTabRight = 10 + this.TabRoundedCornerRadius.GetValueOrDefault(0);
+            var capFromTabRight = 10 + this.TabBottomRoundedCornerRadius.GetValueOrDefault(0);
 
             g.DrawImage(
                 image,
@@ -713,6 +776,25 @@
                 widthUnit,
                 heightUnit
                 );
+        }
+
+        private bool IsLockedTabIndex(int index)
+        {
+            if (index < 0 ||
+                this._baseTabControl.TabPages.Count <= index)
+                return false;
+
+            var tabName = this._baseTabControl.TabPages[index].Name;
+
+            return !string.IsNullOrEmpty(tabName) &&
+                this.LockedTabNames.Contains(tabName);
+        }
+
+        private int GetTabIndicatorHeight()
+        {
+            return this.DrawTabIndicator ?
+                this._tab_indicator_height :
+                0;
         }
     }
 }
