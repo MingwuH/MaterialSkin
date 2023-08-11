@@ -82,7 +82,12 @@
         private Rectangle _removeRect;
         private int? _tabUpperRoundedCornerRadius;
         private int? _tabBottomRoundedCornerRadius;
+        private int? _tab_right_click_index;
+        private int? _left_tab_padding;
+        private int? _tab_width_min;
+        private int? _tab_width_max;
         private bool? _drawTabIndicator;
+        private bool? _tabShrinkable;
         private Color? _primaryColor;
         private Color? _textColor;
         private Brush _tabBackBrush;
@@ -179,6 +184,20 @@
             }
         }
         /// <summary>
+        /// If set, the unlocked tabs could be shrink to fit the control width.
+        /// </summary>
+        public bool TabShrinkable
+        {
+            get
+            {
+                return this._tabShrinkable.GetValueOrDefault(false);
+            }
+            set
+            {
+                this._tabShrinkable = value;
+            }
+        }
+        /// <summary>
         /// Indicate the specified tab does not allow to be removed.
         /// </summary>
         public List<string> LockedTabNames
@@ -239,6 +258,67 @@
         {
             get;
             set;
+        }
+        /// <summary>
+        /// Indicate the current tab of right clicked.
+        /// </summary>
+        public int? TabRightClickedIndex
+        {
+            get
+            {
+                return this._tab_right_click_index.GetValueOrDefault(-1) < 0 ?
+                    null :
+                    this._tab_right_click_index;
+            }
+        }
+        /// <summary>
+        /// The Padding of the first tab.
+        /// </summary>
+        public int LeftTabPadding
+        {
+            get
+            {
+                return this._left_tab_padding.GetValueOrDefault(FIRST_TAB_PADDING);
+            }
+            set
+            {
+                this._left_tab_padding = value;
+            }
+        }
+        /// <summary>
+        /// The minimum width of tab.
+        /// </summary>
+        public int TabMinimumWidth
+        {
+            get
+            {
+                var min = ICON_SIZE
+                    + this._tabUpperRoundedCornerRadius.GetValueOrDefault(0) * 2
+                    + this._tabBottomRoundedCornerRadius.GetValueOrDefault(0) * 2;
+
+                if (this._tab_width_min.GetValueOrDefault(TAB_WIDTH_MIN) < min)
+                    this._tab_width_min = min;
+
+                return this._tab_width_min.GetValueOrDefault(min);
+            }
+            set
+            {
+                this._tab_width_min = value;
+            }
+        }
+        /// <summary>
+        /// The maximum width of tab.
+        /// </summary>
+        public int TabMaximumWidth
+        {
+            get
+            {
+                return this._tab_width_max.GetValueOrDefault(TAB_WIDTH_MAX);
+            }
+            set
+            {
+                this._tab_width_max = value;
+            }
         }
 
         private const int ICON_SIZE = 24;
@@ -357,6 +437,37 @@
                 rippleBrush.Dispose();
             }
 
+            if (this.TabShrinkable &&
+                this._tabRects.Count(t => !this.IsLockedTabIndex(this._tabRects.IndexOf(t))) > 0)
+            {
+                var lockedTabs = this._tabRects.Count(t => this.IsLockedTabIndex(this._tabRects.IndexOf(t)));
+                var unlockedTabs = this._tabRects.Count - lockedTabs;
+                var lockedTabsWidth = lockedTabs * this.LockedTabWidth.GetValueOrDefault(0);
+                var unlockTabsWidthForDrawing = this.Bounds.Width - this.LeftTabPadding - lockedTabsWidth;
+                var remainder = unlockTabsWidthForDrawing % unlockedTabs;
+                var shiftLeft = unlockedTabs - remainder;
+
+                this.TabMaximumWidth = unlockTabsWidthForDrawing / unlockedTabs + 1;
+                this.UpdateTabRects();
+
+                // Shrink the last tab width if remainder is not empty.
+                if (remainder > 0)
+                {
+                    for (var i = this._tabRects.Count - 1; i >= 0; --i)
+                    {
+                        var rect = this._tabRects[i];
+                        if (this.IsLockedTabIndex(i))
+                        {
+                            this._tabRects[i] = new Rectangle(rect.X - shiftLeft, rect.Y, rect.Width, rect.Height);
+                            continue;
+                        }
+
+                        this._tabRects[i] = new Rectangle(rect.X, rect.Y, rect.Width - shiftLeft, rect.Height);
+                        break;
+                    }
+                }
+            }
+
             // Draw tab with rounded corner
             if (this.TabUpperRoundedCornerRadius.GetValueOrDefault(0) > 0 &&
                 this.TabBottomRoundedCornerRadius.GetValueOrDefault(0) > 0)
@@ -386,12 +497,6 @@
                     else
                     {
                         g.DrawPath(new Pen(Color.Black), gp);
-                    }
-
-                    if (!this.IsLockedTabIndex(this._tabRects.IndexOf(rect)))
-                    {
-                        // Draw remove buttons
-                        this.DrawRemoveButtonImage(g, rect);
                     }
                 }
             }
@@ -427,26 +532,6 @@
                         hoveredTabRect.Height - this.GetTabIndicatorHeight()
                         );
                 }
-
-                // Draw remove button
-                if (this.RemoveButtonImageIndex.GetValueOrDefault(-1) >= 0 &&
-                    this.RemoveButtonImageIndex.Value < this._baseTabControl.ImageList.Images.Count)
-                {
-                    this.UpdateRmoveButtonRect();
-
-                    if (!this.IsLockedTabIndex(this._tab_over_index) ||
-                        this._tab_over_index < this._tabRects.Count - 1)
-                    {
-                        if (this._is_in_tab_remove_rect)
-                        {
-                            g.FillEllipse(
-                                Brushes.Red,
-                                this._removeRect
-                                );
-                        }
-                        this.DrawRemoveButtonImage(g, this._tabRects[_tab_over_index]);
-                    }
-                }
             }
 
             foreach (TabPage tabPage in _baseTabControl.TabPages)
@@ -467,7 +552,7 @@
                             textLocation.Height = 10;
                         }
 
-                        if (((TAB_HEADER_PADDING*2) + textSize.Width < TAB_WIDTH_MAX))
+                        if (((TAB_HEADER_PADDING*2) + textSize.Width < this.TabMaximumWidth))
                         {
                             NativeText.DrawTransparentText(
                             CharacterCasing == CustomCharacterCasing.Upper ? tabPage.Text.ToUpper() :
@@ -514,6 +599,12 @@
                         }
                         g.DrawImage(!String.IsNullOrEmpty(tabPage.ImageKey) ? _baseTabControl.ImageList.Images[tabPage.ImageKey]: _baseTabControl.ImageList.Images[tabPage.ImageIndex], iconRect);
                     }
+                }
+
+                if (!this.IsLockedTabIndex(currentTabIndex))
+                {
+                    // Draw remove buttons
+                    this.DrawRemoveButtonImage(g, this._tabRects[currentTabIndex]);
                 }
             }
 
@@ -573,27 +664,31 @@
 
             this.UpdateRmoveButtonRect();
 
-            // Remove tab.
-            for (var i = 0; i < _tabRects.Count; i++)
+            if (e.Button == MouseButtons.Left ||
+                e.Button == MouseButtons.Middle)
             {
-                if (!this._tabRects[i].Contains(e.Location))
-                    continue;
-
-                // Skip locked tab.
-                if (this.IsLockedTabIndex(i))
-                    continue;
-
-                // Remove tab
-                if (e.Button == MouseButtons.Middle ||
-                    this._removeRect.Contains(e.Location))
+                // Remove tab.
+                for (var i = 0; i < _tabRects.Count; i++)
                 {
-                    if (i == this._tabRects.Count - 1 &&
-                        i == this._baseTabControl.SelectedIndex)
-                        this._baseTabControl.SelectedIndex = i - 1;
+                    if (!this._tabRects[i].Contains(e.Location))
+                        continue;
 
-                    var tabPage = this._baseTabControl.TabPages[i];
-                    this._baseTabControl.TabPages.Remove(tabPage);
-                    return;
+                    // Skip locked tab.
+                    if (this.IsLockedTabIndex(i))
+                        continue;
+
+                    // Remove tab
+                    if (e.Button == MouseButtons.Middle ||
+                        this._removeRect.Contains(e.Location))
+                    {
+                        if (i == this._tabRects.Count - 1 &&
+                            i == this._baseTabControl.SelectedIndex)
+                            this._baseTabControl.SelectedIndex = i - 1;
+
+                        var tabPage = this._baseTabControl.TabPages[i];
+                        this._baseTabControl.TabPages.Remove(tabPage);
+                        return;
+                    }
                 }
             }
 
@@ -606,7 +701,14 @@
             {
                 if (_tabRects[i].Contains(e.Location))
                 {
+                    if (e.Button == MouseButtons.Right)
+                    {
+                        this._tab_right_click_index = i;
+                        return;
+                    }
+
                     _baseTabControl.SelectedIndex = i;
+                    break;
                 }
             }
 
@@ -662,6 +764,13 @@
             Invalidate();
         }
 
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            if (this.TabShrinkable)
+                this.Invalidate();
+        }
+
         private void UpdateTabRects()
         {
             _tabRects = new List<Rectangle>();
@@ -683,10 +792,10 @@
                             if (_tabLabel == TabLabelStyle.Icon) textSize.Width = ICON_SIZE;
 
                             int TabWidth = (TAB_HEADER_PADDING * 2) + textSize.Width;
-                            if (TabWidth > TAB_WIDTH_MAX)
-                                TabWidth = TAB_WIDTH_MAX;
-                            else if (TabWidth < TAB_WIDTH_MIN)
-                                TabWidth = TAB_WIDTH_MIN;
+                            if (TabWidth > this.TabMaximumWidth)
+                                TabWidth = this.TabMaximumWidth;
+                            else if (TabWidth < this.TabMinimumWidth)
+                                TabWidth = this.TabMinimumWidth;
 
                             // change locked tab width
                             if (this.IsLockedTabIndex(i) &&
@@ -694,7 +803,7 @@
                                 TabWidth = this.LockedTabWidth.Value;
 
                             if (i==0)
-                                _tabRects.Add(new Rectangle(FIRST_TAB_PADDING - (TAB_HEADER_PADDING), 0, TabWidth, Height));
+                                _tabRects.Add(new Rectangle(this.LeftTabPadding - (TAB_HEADER_PADDING), 0, TabWidth, Height));
                             else
                                 _tabRects.Add(new Rectangle(_tabRects[i - 1].Right, 0, TabWidth, Height));
 
@@ -709,23 +818,19 @@
 
         private void UpdateRmoveButtonRect()
         {
-            if (_tab_over_index >= 0)
+            if (this._tab_over_index >= 0 &&
+                this.TryGetRemoveImage(out var image))
             {
-                if (this.RemoveButtonImageIndex.GetValueOrDefault(-1) >= 0 &&
-                    this.RemoveButtonImageIndex.Value < this._baseTabControl.ImageList.Images.Count)
-                {
-                    var image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
-                    var widthUnit = image.Width / 2;
-                    var heightUnit = image.Height / 2;
-                    var shift = 10 + this.TabBottomRoundedCornerRadius.GetValueOrDefault(0);
+                var widthUnit = image.Width / 2;
+                var heightUnit = image.Height / 2;
+                var shift = 10 + this.TabBottomRoundedCornerRadius.GetValueOrDefault(0);
 
-                    this._removeRect = new Rectangle(
-                        _tabRects[_tab_over_index].Right - (int)Math.Round(widthUnit * 1.5) - shift,
-                        (_tabRects[_tab_over_index].Bottom - heightUnit * 2) / 2,
-                        widthUnit * 2,
-                        heightUnit * 2
-                        );
-                }
+                this._removeRect = new Rectangle(
+                    _tabRects[_tab_over_index].Right - (int)Math.Round(widthUnit * 1.5) - shift,
+                    (_tabRects[_tab_over_index].Bottom - heightUnit * 2) / 2,
+                    widthUnit * 2,
+                    heightUnit * 2
+                    );
             }
         }
 
@@ -760,14 +865,38 @@
 
         private void DrawRemoveButtonImage(Graphics g, Rectangle rect)
         {
-            if (this.RemoveButtonImageIndex.GetValueOrDefault(-1) < 0 ||
-                this._baseTabControl.ImageList.Images.Count <= this.RemoveButtonImageIndex.GetValueOrDefault(-1))
+            if (!this.TryGetRemoveImage(out var image))
                 return;
 
-            var image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
             var widthUnit = image.Width / 2;
             var heightUnit = image.Height / 2;
             var capFromTabRight = 10 + this.TabBottomRoundedCornerRadius.GetValueOrDefault(0);
+            var isHoverTab = this._tab_over_index == this._tabRects.IndexOf(rect);
+            var isSelectedTab = this._baseTabControl.SelectedIndex == this._tabRects.IndexOf(rect);
+            var brush = isHoverTab ? this.TabHoverBrush :
+                        isSelectedTab ? this.TabSelectedBrush :
+                        this.TabBackBrush;
+
+            this.UpdateRmoveButtonRect();
+
+            g.FillRegion(
+                brush,
+                new Region(
+                    new Rectangle(
+                        rect.Right - widthUnit - capFromTabRight - 2,
+                        heightUnit,
+                        widthUnit + this.TabBottomRoundedCornerRadius.GetValueOrDefault(0),
+                        rect.Height / 2
+                    )));
+
+            if (isHoverTab &&
+                this._is_in_tab_remove_rect)
+            {
+                g.FillEllipse(
+                    Brushes.Red,
+                    this._removeRect
+                    );
+            }
 
             g.DrawImage(
                 image,
@@ -795,6 +924,20 @@
             return this.DrawTabIndicator ?
                 this._tab_indicator_height :
                 0;
+        }
+
+        private bool TryGetRemoveImage(out Image image)
+        {
+            image = null;
+
+            if (this.RemoveButtonImageIndex.GetValueOrDefault(-1) < 0 ||
+                this._baseTabControl.ImageList == null ||
+                this._baseTabControl.ImageList.Images.Count <= this.RemoveButtonImageIndex.GetValueOrDefault(-1))
+                return false;
+
+            image = this._baseTabControl.ImageList.Images[this.RemoveButtonImageIndex.GetValueOrDefault(0)];
+
+            return true;
         }
     }
 }
