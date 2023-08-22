@@ -655,6 +655,25 @@
             return secondaryA + (int)((primaryA - secondaryA) * animationProgress);
         }
 
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+
+            this._tab_right_click_index = -1;
+
+            if (e.Button == MouseButtons.Right)
+            {
+                for (var i = 0; i < _tabRects.Count; i++)
+                {
+                    if (_tabRects[i].Contains(e.Location))
+                    {
+                        this._tab_right_click_index = i;
+                        return;
+                    }
+                }
+            }
+
+        }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
@@ -701,12 +720,6 @@
             {
                 if (_tabRects[i].Contains(e.Location))
                 {
-                    if (e.Button == MouseButtons.Right)
-                    {
-                        this._tab_right_click_index = i;
-                        return;
-                    }
-
                     _baseTabControl.SelectedIndex = i;
                     break;
                 }
