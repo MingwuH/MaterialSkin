@@ -384,6 +384,10 @@
                 Invalidate();
             }
         }
+        /// <summary>
+        /// Indicate Tab Label should be multi-lines once the text is too long.
+        /// </summary>
+        public bool TabLabelMultiLine { get; set; } = true;
 
 
         public MaterialTabSelector()
@@ -543,16 +547,52 @@
                     // Text
                     using (NativeTextRenderer NativeText = new NativeTextRenderer(g))
                     {
-                        Size textSize = TextRenderer.MeasureText(_baseTabControl.TabPages[currentTabIndex].Text, Font);
-                        Rectangle textLocation = new Rectangle(_tabRects[currentTabIndex].X+ (TAB_HEADER_PADDING/2), _tabRects[currentTabIndex].Y, _tabRects[currentTabIndex].Width - (TAB_HEADER_PADDING), _tabRects[currentTabIndex].Height);
+                        var padding = this.IsLockedTabIndex(currentTabIndex) ?
+                            0 :
+                            TAB_HEADER_PADDING / 2;
+                        var textSize = TextRenderer.MeasureText(_baseTabControl.TabPages[currentTabIndex].Text, Font);
+                        var textLocation = new Rectangle(
+                            _tabRects[currentTabIndex].X + padding,
+                            _tabRects[currentTabIndex].Y,
+                            _tabRects[currentTabIndex].Width - padding * 2,
+                            _tabRects[currentTabIndex].Height
+                            );
 
-                        if (_tabLabel == TabLabelStyle.IconAndText)
+                        if (_tabLabel == TabLabelStyle.IconAndText &&
+                            this.TabLabelMultiLine)
                         {
                             textLocation.Y = 46;
                             textLocation.Height = 10;
                         }
 
-                        if (((TAB_HEADER_PADDING*2) + textSize.Width < this.TabMaximumWidth))
+                        if (!this.TabLabelMultiLine)
+                        {
+                            var displayText = tabPage.Text;
+                            for (int i = tabPage.Text.Length - 1; i >= 0; i--)
+                            {
+                                var iconSize = string.IsNullOrEmpty(tabPage.ImageKey) ||
+                                               tabPage.ImageIndex < 0 ?
+                                               0 :
+                                               ICON_SIZE;
+                                var displaySize = TextRenderer.MeasureText(displayText, Font);
+
+                                if (padding + iconSize + displaySize.Width < textLocation.Width)
+                                    break;
+
+                                displayText = tabPage.Text.Substring(0, i);
+                            }
+
+                            NativeText.DrawTransparentText(
+                            CharacterCasing == CustomCharacterCasing.Upper ? displayText.ToUpper() :
+                            CharacterCasing == CustomCharacterCasing.Lower ? displayText.ToLower() :
+                            CharacterCasing == CustomCharacterCasing.Proper ? textInfo.ToTitleCase(displayText.ToLower()) : displayText,
+                            Font,
+                            Color.FromArgb(CalculateTextAlpha(currentTabIndex, animationProgress), this.TextColor),
+                            textLocation.Location,
+                            textLocation.Size,
+                            NativeTextRenderer.TextAlignFlags.Center | NativeTextRenderer.TextAlignFlags.Middle);
+                        }
+                        else if (((TAB_HEADER_PADDING*2) + textSize.Width < this.TabMaximumWidth))
                         {
                             NativeText.DrawTransparentText(
                             CharacterCasing == CustomCharacterCasing.Upper ? tabPage.Text.ToUpper() :
@@ -595,7 +635,8 @@
                             ICON_SIZE, ICON_SIZE);
                         if (_tabLabel == TabLabelStyle.IconAndText)
                         {
-                            iconRect.Y = 12;
+                            if (!string.IsNullOrEmpty(tabPage.Text))
+                                iconRect.X = _tabRects[currentTabIndex].X + this.TabUpperRoundedCornerRadius.GetValueOrDefault(0);
                         }
                         g.DrawImage(!String.IsNullOrEmpty(tabPage.ImageKey) ? _baseTabControl.ImageList.Images[tabPage.ImageKey]: _baseTabControl.ImageList.Images[tabPage.ImageIndex], iconRect);
                     }
@@ -802,7 +843,10 @@
                         for (int i = 0; i < _baseTabControl.TabPages.Count; i++)
                         {
                             Size textSize = TextRenderer.MeasureText(_baseTabControl.TabPages[i].Text, Font);
-                            if (_tabLabel == TabLabelStyle.Icon) textSize.Width = ICON_SIZE;
+                            if (_tabLabel == TabLabelStyle.Icon)
+                                textSize.Width = ICON_SIZE;
+                            else if (_tabLabel == TabLabelStyle.IconAndText)
+                                textSize.Width += ICON_SIZE;
 
                             int TabWidth = (TAB_HEADER_PADDING * 2) + textSize.Width;
                             if (TabWidth > this.TabMaximumWidth)
