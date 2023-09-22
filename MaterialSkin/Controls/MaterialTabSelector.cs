@@ -90,6 +90,7 @@
         private bool? _tabShrinkable;
         private Color? _primaryColor;
         private Color? _textColor;
+        private Color? _tabBorderColor;
         private Brush _tabBackBrush;
         private Brush _tabHoverBrush;
 
@@ -119,6 +120,20 @@
             set
             {
                 this._textColor = value;
+            }
+        }
+        /// <summary>
+        /// Indicate tab border color.
+        /// </summary>
+        public Color TabBorderColor
+        {
+            get
+            {
+                return _tabBorderColor.GetValueOrDefault(Color.Black);
+            }
+            set
+            {
+                this._tabBorderColor = value;
             }
         }
         /// <summary>
@@ -321,7 +336,7 @@
             }
         }
 
-        private const int ICON_SIZE = 24;
+        private const int ICON_SIZE = 16;
         private const int FIRST_TAB_PADDING = 50;
         private const int TAB_HEADER_PADDING = 24;
         private const int TAB_WIDTH_MIN = 160;
@@ -496,11 +511,11 @@
                         g.FillPath(brush, gp);
 
                         if (selectedRect == rect)
-                            g.DrawPath(new Pen(Color.Black), gp);
+                            g.DrawPath(new Pen(this.TabBorderColor), gp);
                     }
                     else
                     {
-                        g.DrawPath(new Pen(Color.Black), gp);
+                        g.DrawPath(new Pen(this.TabBorderColor), gp);
                     }
                 }
             }
@@ -524,7 +539,7 @@
                     if (this.TabHoverBrush != null)
                         g.FillPath(this.TabHoverBrush, gp);
                     if (this._baseTabControl.SelectedIndex == this._tab_over_index)
-                        g.DrawPath(new Pen(Color.Black), gp);
+                        g.DrawPath(new Pen(this.TabBorderColor), gp);
                 }
                 else
                 {
@@ -551,8 +566,11 @@
                             0 :
                             TAB_HEADER_PADDING / 2;
                         var textSize = TextRenderer.MeasureText(_baseTabControl.TabPages[currentTabIndex].Text, Font);
+                        var iconPadding = string.IsNullOrEmpty(tabPage.ImageKey) || tabPage.ImageIndex < 0 ? 0 :
+                                          string.IsNullOrWhiteSpace(tabPage.Text) ? 0 :
+                                          ICON_SIZE / 2;
                         var textLocation = new Rectangle(
-                            _tabRects[currentTabIndex].X + padding,
+                            _tabRects[currentTabIndex].X + padding + iconPadding,
                             _tabRects[currentTabIndex].Y,
                             _tabRects[currentTabIndex].Width - padding * 2,
                             _tabRects[currentTabIndex].Height
@@ -636,7 +654,7 @@
                         if (_tabLabel == TabLabelStyle.IconAndText)
                         {
                             if (!string.IsNullOrEmpty(tabPage.Text))
-                                iconRect.X = _tabRects[currentTabIndex].X + this.TabUpperRoundedCornerRadius.GetValueOrDefault(0);
+                                iconRect.X = _tabRects[currentTabIndex].X + this.TabUpperRoundedCornerRadius.GetValueOrDefault(0) + ICON_SIZE / 2;
                         }
                         g.DrawImage(!String.IsNullOrEmpty(tabPage.ImageKey) ? _baseTabControl.ImageList.Images[tabPage.ImageKey]: _baseTabControl.ImageList.Images[tabPage.ImageIndex], iconRect);
                     }
@@ -671,8 +689,8 @@
                 var selectedTab = this._tabRects[_baseTabControl.SelectedIndex];
                 var y = selectedTab.Bottom - 1;
 
-                g.DrawLine(new Pen(Color.Black), 0, y, selectedTab.Left + 3, y);
-                g.DrawLine(new Pen(Color.Black), selectedTab.Right - 3, y, this.Right, y);
+                g.DrawLine(new Pen(this.TabBorderColor), 0, y, selectedTab.Left + 3, y);
+                g.DrawLine(new Pen(this.TabBorderColor), selectedTab.Right - 3, y, this.Right, y);
             }
         }
 
