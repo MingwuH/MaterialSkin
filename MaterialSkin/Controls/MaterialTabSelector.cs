@@ -894,6 +894,7 @@
         private void UpdateRmoveButtonRect()
         {
             if (this._tab_over_index >= 0 &&
+                this._tab_over_index < _tabRects.Count &&
                 this.TryGetRemoveImage(out var image))
             {
                 var widthUnit = image.Width / 2;
@@ -984,14 +985,21 @@
 
         private bool IsLockedTabIndex(int index)
         {
-            if (index < 0 ||
-                this._baseTabControl.TabPages.Count <= index)
+            try
+            {
+                if (index < 0 ||
+                    index >= this._baseTabControl.TabPages.Count)
+                    return false;
+
+                var tabName = this._baseTabControl.TabPages[index].Name;
+
+                return !string.IsNullOrEmpty(tabName) &&
+                    this.LockedTabNames.Contains(tabName);
+            }
+            catch
+            {
                 return false;
-
-            var tabName = this._baseTabControl.TabPages[index].Name;
-
-            return !string.IsNullOrEmpty(tabName) &&
-                this.LockedTabNames.Contains(tabName);
+            }
         }
 
         private int GetTabIndicatorHeight()
